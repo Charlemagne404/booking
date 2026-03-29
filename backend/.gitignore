@@ -1,4 +1,6 @@
 __pycache__
 *.pyc
 .env
+.envrc
+.venv
 static/temp_swish.png
