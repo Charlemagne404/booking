@@ -9,6 +9,7 @@
 ###########################################################################
 
 from flask import Blueprint, request, abort, session, redirect
+from secrets import token_urlsafe
 
 from base import base_req
 from decorators.auth import google_logged_in, user_registered
@@ -53,10 +54,14 @@ def login():
 
     # Use library to construct the request for Google login and provide
     # scopes that let you retrieve user's profile from Google
+    state = token_urlsafe(32)
+    session["oauth_state"] = state
+
     request_uri = client.prepare_request_uri(
         authorization_endpoint,
         redirect_uri=BACKEND_URL + "/api/auth/login/callback",
         scope=["openid", "email", "profile"],
+        state=state,
     )
 
     return base_req(response={"login_url": request_uri})
@@ -66,10 +71,15 @@ def login():
 def callback():
     # Get authorization code Google sent back
     code = request.args.get("code")
+    state = request.args.get("state")
 
     # If no code was sent
     if not code:
         abort(400, "missing oauth token")
+
+    # Validate state to prevent CSRF
+    if not state or state != session.pop("oauth_state", None):
+        abort(400, "invalid oauth state")
 
     # Find out what URL to hit to get tokens that allow you to ask for
     # things on behalf of a user
@@ -224,7 +234,6 @@ def register():
 @auth_blueprint.route("/logout")
 @google_logged_in
 def logout():
-    session.pop("google_login", None)
-    session.pop("is_admin", None)
+    session.clear()
 
     return redirect(FRONTEND_URL)

@@ -9,6 +9,7 @@
 ###########################################################################
 
 from os import environ
+from io import BytesIO
 
 import qrcode
 import qrcode.image.svg
@@ -36,4 +37,7 @@ def generate_swish_qr(name, school_class, seat, booking_type):
 
     img = qr.make_image()
 
-    img.save("static/temp_swish.png")
+    buf = BytesIO()
+    img.save(buf)
+    buf.seek(0)
+    return buf

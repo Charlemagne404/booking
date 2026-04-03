@@ -271,10 +271,10 @@ def swish(seat_type, id):
     if not booking:
         abort(404, "Booking does not exist")
 
-    generate_swish_qr(
+    buf = generate_swish_qr(
         booking.name,
         booking.school_class,
         booking.seat,
         0 if seat_type == "standard" else 1,
     )
-    return send_file("static/temp_swish.png", mimetype="image/png")
+    return send_file(buf, mimetype="image/png")
