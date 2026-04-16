@@ -1,14 +1,15 @@
 import React, { useState } from "react";
 
-import { Container, TextField, Button, Icon, Grid } from "@material-ui/core";
+import {
+  Container,
+  TextField,
+  Button,
+} from "@material-ui/core";
 import Alert from "@material-ui/lab/Alert";
-import Typography from "@material-ui/core/Typography";
-import Link from "@material-ui/core/Link";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
 function Register() {
-  // form variables
   const [password, setPassword] = useState("");
   const [schoolClass, setSchoolClass] = useState("");
   const [error, setError] = useState("");
@@ -33,7 +34,6 @@ function Register() {
       .then((response) => response.json())
       .then((data) => {
         if (data.http_code === 200) {
-          // if 200, all is good
           window.location.reload();
         } else {
           setError(`${data.message} (${data.http_code})`);
@@ -45,64 +45,69 @@ function Register() {
   };
 
   return (
-    <Container maxWidth="sm">
-      <Typography variant="h4" gutterBottom align="center">
-        Datorklubben Bokningssystem
-      </Typography>
-      <Typography variant="body1" gutterBottom align="center">
-        Du är inloggad men inte registrerad.
-      </Typography>
+    <div className="app-shell">
+      <Container className="page-shell page-shell-tight" maxWidth="md">
+        <div className="hero-panel auth-card">
+          <div className="hero-grid">
+            <div>
+              <p className="kicker">Första gången här</p>
+              <h1 className="hero-title">Slutför registreringen</h1>
+              <p className="hero-lead">
+                Du är redan inloggad. Ange registreringslösenordet och din klass
+                för att kunna boka plats på LAN:et.
+              </p>
+            </div>
 
-      <Grid container spacing={2}>
-        <Grid item xs={12}>
-          <Grid container justify="center" spacing={1}>
-            <Button
-              justify="center"
-              variant="contained"
-              color="primary"
-              href={`${BACKEND_URL}/api/auth/logout`}
-            >
-              Logga ut
-            </Button>
-          </Grid>
-        </Grid>
-      </Grid>
-
-      <Container maxWidth="xs">
-        <form onSubmit={handleSubmit} noValidate autoComplete="off">
-          <div>
-            <TextField
-              label="Lösenord"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              helperText="Ange registreringslösenordet från datorklubbens styrelse."
-            />
+            <div className="meta-stack">
+              <div className="meta-row">
+                <span className="meta-label">Behövs</span>
+                <span className="meta-value">Registreringslösenord från styrelsen</span>
+              </div>
+              <div className="meta-row">
+                <span className="meta-label">Efteråt</span>
+                <span className="meta-value">Du kommer direkt in i bokningsvyn</span>
+              </div>
+            </div>
           </div>
-          <div>
-            <TextField
-              label="Klass"
-              value={schoolClass}
-              onChange={(e) => setSchoolClass(e.target.value)}
-              helperText="Ange namnet på din klass"
-            />
-          </div>
-          <br />
+        </div>
 
-          <Button
-            variant="contained"
-            color="primary"
-            endIcon={<Icon>send</Icon>}
-            type="submit"
-          >
-            Registrera
-          </Button>
-        </form>
+        <div className="section-stack">
+          <div className="section-card">
+            <form className="form-stack" onSubmit={handleSubmit} noValidate autoComplete="off">
+              <TextField
+                label="Lösenord"
+                variant="outlined"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                helperText="Ange registreringslösenordet från datorklubbens styrelse."
+                fullWidth
+              />
+              <TextField
+                label="Klass"
+                variant="outlined"
+                value={schoolClass}
+                onChange={(e) => setSchoolClass(e.target.value)}
+                helperText="Ange namnet på din klass."
+                fullWidth
+              />
+              <div className="hero-actions">
+                <Button variant="contained" color="primary" type="submit">
+                  Registrera
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="primary"
+                  href={`${BACKEND_URL}/api/auth/logout`}
+                >
+                  Logga ut
+                </Button>
+              </div>
+            </form>
+            {error && <Alert severity="error">{error}</Alert>}
+          </div>
+        </div>
       </Container>
-      {error && <Alert severity="error">{error}</Alert>}
-      <Typography align="center" variant="caption" gutterBottom display="block">
-        Kodat av <Link href="https://vilhelmprytz.se">Vilhelm Prytz</Link>
-      </Typography>
-    </Container>
+    </div>
   );
 }
 

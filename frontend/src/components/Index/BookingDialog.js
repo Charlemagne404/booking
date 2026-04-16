@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { useDispatch } from "react-redux";
 
-// material-ui
 import Button from "@material-ui/core/Button";
 import Dialog from "@material-ui/core/Dialog";
 import DialogActions from "@material-ui/core/DialogActions";
@@ -12,9 +11,10 @@ import Alert from "@material-ui/lab/Alert";
 import Select from "@material-ui/core/Select";
 import MenuItem from "@material-ui/core/MenuItem";
 import FormHelperText from "@material-ui/core/FormHelperText";
+import FormControl from "@material-ui/core/FormControl";
+import InputLabel from "@material-ui/core/InputLabel";
 import Link from "@material-ui/core/Link";
 
-// redux
 import { fetchBookings } from "../../redux/bookingActions";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -25,16 +25,17 @@ function BookingDialog(props) {
   const [open, setOpen] = useState(false);
   const [available, setAvailable] = useState([]);
   const [error, setError] = useState("");
-
   const [seat, setSeat] = useState("");
 
   const handleClickOpen = () => {
     setOpen(true);
+    setError("");
     updateAvailableSeatList();
   };
 
   const handleClose = () => {
     setOpen(false);
+    setSeat("");
   };
 
   const updateAvailableSeatList = () => {
@@ -44,7 +45,6 @@ function BookingDialog(props) {
       .then((response) => response.json())
       .then((data) => {
         if (data.http_code === 200) {
-          // if 200, all is good
           if (props.seat_type === "standard") {
             setAvailable(data.response.available_seats.map((a) => a));
           } else if (props.seat_type === "console") {
@@ -64,6 +64,11 @@ function BookingDialog(props) {
   };
 
   const handleSubmit = () => {
+    if (seat === "") {
+      setError("Välj en plats innan du fortsätter.");
+      return;
+    }
+
     fetch(`${BACKEND_URL}/api/booking/book`, {
       credentials: "include",
       method: "post",
@@ -92,43 +97,46 @@ function BookingDialog(props) {
 
   return (
     <div>
-      <Button variant="outlined" color="primary" onClick={handleClickOpen}>
+      <Button variant="contained" color={props.seat_type === "standard" ? "primary" : "secondary"} onClick={handleClickOpen}>
         {props.title}
       </Button>
-      <Dialog
-        open={open}
-        onClose={handleClose}
-        aria-labelledby="form-dialog-title"
-      >
+      <Dialog open={open} onClose={handleClose} aria-labelledby="form-dialog-title" fullWidth maxWidth="sm">
         <DialogTitle id="form-dialog-title">{props.title}</DialogTitle>
         <DialogContent>
-          <DialogContentText>
+          <DialogContentText className="dialog-copy">
             Använd formuläret nedan för att boka en plats. Registrera dig som
             medlem på <Link href="https://member.tgdk.se">member.tgdk.se</Link>{" "}
-            innan du bokar! {props.info}
+            innan du bokar. {props.info}
           </DialogContentText>
-          <Select
-            labelId="booking-dialog-select-form"
-            id="booking-help-label"
-            value={seat}
-            onChange={(e) => setSeat(e.target.value)}
-          >
-            {Array.from(available).map(function (object) {
-              return (
+
+          <FormControl variant="outlined" fullWidth>
+            <InputLabel id="booking-dialog-select-form">Plats</InputLabel>
+            <Select
+              labelId="booking-dialog-select-form"
+              id="booking-help-label"
+              value={seat}
+              onChange={(e) => setSeat(e.target.value)}
+              label="Plats"
+            >
+              {Array.from(available).map((object) => (
                 <MenuItem key={object} value={object}>
                   {object}
                 </MenuItem>
-              );
-            })}
-          </Select>
-          <FormHelperText>Välj en plats ur listan</FormHelperText>
+              ))}
+            </Select>
+            <FormHelperText>Välj en ledig plats ur listan.</FormHelperText>
+          </FormControl>
+
+          {available.length === 0 && !error && (
+            <p className="empty-note">Det finns inga lediga platser i den här kategorin just nu.</p>
+          )}
           {error && <Alert severity="error">{error}</Alert>}
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleClose} color="primary">
+          <Button onClick={handleClose} color="secondary">
             Avbryt
           </Button>
-          <Button onClick={handleSubmit} color="primary">
+          <Button onClick={handleSubmit} color="primary" variant="contained">
             Boka
           </Button>
         </DialogActions>

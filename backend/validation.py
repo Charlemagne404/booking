@@ -28,6 +28,12 @@ def is_integer(i):
 
 
 def input_validation(i):
+    if not isinstance(i, str):
+        abort(400, "Input variable must be a string.")
+
+    if any(x in i for x in ["\n", "\r", "\t"]):
+        abort(400, "Input variable contains illegal whitespace.")
+
     if any(x in i for x in ILLEGAL_CHARACTERS):
         abort(
             400, "Input variable contains illegal characters (stick to the alphabet)."
@@ -68,3 +74,47 @@ def email_validation(email):
         abort(400, "Invalid email format. Please provide a valid email address.")
     
     return True
+
+
+def normalize_email(email):
+    """Normalize and validate email addresses before storing them."""
+    if not isinstance(email, str):
+        abort(400, "Email must be a valid string")
+
+    normalized = email.strip().lower()
+    email_validation(normalized)
+    return normalized
+
+
+def name_validation(name):
+    """Validate booking name fields."""
+    if not isinstance(name, str):
+        abort(400, "Name must be a valid string")
+
+    normalized = name.strip()
+
+    if input_validation(normalized) and length_validation(
+        normalized, 1, 255, vanity="Name"
+    ):
+        return normalized
+
+
+def school_class_validation(school_class):
+    """Validate and normalize school class fields."""
+    if not isinstance(school_class, str):
+        abort(400, "School class must be a valid string")
+
+    normalized = school_class.strip().upper()
+
+    if input_validation(normalized) and length_validation(
+        normalized, 4, 6, vanity="School class"
+    ):
+        return normalized
+
+
+def boolean_validation(value, vanity="Value"):
+    """Require a strict JSON boolean."""
+    if not isinstance(value, bool):
+        abort(400, f"{vanity} must be boolean")
+
+    return value

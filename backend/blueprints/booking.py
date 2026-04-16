@@ -9,9 +9,16 @@
 ###########################################################################
 
 from flask import session, abort, Blueprint, request, send_file
+from sqlalchemy.exc import IntegrityError
 
 from decorators.auth import google_logged_in, user_registered, is_admin
-from validation import is_integer
+from validation import (
+    is_integer,
+    normalize_email,
+    name_validation,
+    school_class_validation,
+    boolean_validation,
+)
 from models import db, Booking, User, ConsoleBooking, Admin
 from base import base_req
 from swish import generate_swish_qr
@@ -22,53 +29,72 @@ NUM_SEATS = 55
 NUM_CONSOLE_SEATS = 20
 
 
+def get_booking_model(seat_type):
+    if seat_type == "standard":
+        return Booking, NUM_SEATS
+
+    if seat_type == "console":
+        return ConsoleBooking, NUM_CONSOLE_SEATS
+
+    abort(400, "Invalid seat_type")
+
+
+def current_user_is_admin():
+    return Admin.query.filter_by(email=session["google_email"]).first() is not None
+
+
+def booking_picture_url(email):
+    user = User.query.filter_by(email=email).first()
+    return user.google_picture_url if user and user.google_picture_url else ""
+
+
+def serialize_booking(booking, can_view_private, can_view_admin_fields):
+    return {
+        "seat": booking.seat,
+        "name": booking.name if can_view_private else "Upptagen",
+        "school_class": booking.school_class if can_view_private else "",
+        "email": booking.email if can_view_admin_fields else None,
+        "paid": booking.paid if can_view_private else None,
+        "picture_url": booking_picture_url(booking.email) if can_view_private else "",
+        "time_created": str(booking.time_created) if can_view_private else None,
+        "time_updated": str(booking.time_updated) if can_view_private else None,
+    }
+
+
+def require_json_object():
+    payload = request.get_json(silent=True)
+
+    if not isinstance(payload, dict):
+        abort(400, "Request body must be a JSON object")
+
+    return payload
+
+
 @booking_blueprint.route("/bookings")
 @google_logged_in
 @user_registered
 def bookings():
-    bookings = Booking.query.all()
+    standard_bookings = Booking.query.all()
     console_bookings = ConsoleBooking.query.all()
+    is_admin_user = current_user_is_admin()
+    current_email = session["google_email"]
 
     return base_req(
         response={
             "bookings": [
-                {
-                    "seat": booking.seat,
-                    "name": booking.name,
-                    "school_class": booking.school_class,
-                    "email": None
-                    if len(Admin.query.filter_by(email=session["google_email"]).all())
-                    < 1
-                    else booking.email,
-                    "paid": booking.paid,
-                    "picture_url": User.query.filter_by(email=booking.email)
-                    .first()
-                    .google_picture_url
-                    if len(User.query.filter_by(email=booking.email).all()) != 0
-                    else "",
-                    "time_created": str(booking.time_created),
-                    "time_updated": str(booking.time_updated),
-                }
-                for booking in bookings
+                serialize_booking(
+                    booking,
+                    can_view_private=is_admin_user or booking.email == current_email,
+                    can_view_admin_fields=is_admin_user,
+                )
+                for booking in standard_bookings
             ],
             "console_bookings": [
-                {
-                    "seat": booking.seat,
-                    "name": booking.name,
-                    "school_class": booking.school_class,
-                    "email": None
-                    if len(Admin.query.filter_by(email=session["google_email"]).all())
-                    < 1
-                    else booking.email,
-                    "paid": booking.paid,
-                    "picture_url": User.query.filter_by(email=booking.email)
-                    .first()
-                    .google_picture_url
-                    if len(User.query.filter_by(email=booking.email).all()) != 0
-                    else "",
-                    "time_created": str(booking.time_created),
-                    "time_updated": str(booking.time_updated),
-                }
+                serialize_booking(
+                    booking,
+                    can_view_private=is_admin_user or booking.email == current_email,
+                    can_view_admin_fields=is_admin_user,
+                )
                 for booking in console_bookings
             ],
             "num_seats": NUM_SEATS,
@@ -82,63 +108,80 @@ def bookings():
 @user_registered
 @is_admin
 def modify(id):
-    json = request.json
+    if not is_integer(id):
+        abort(400, "Booking id must be integer")
 
-    seat_type = json["seat_type"] if "seat_type" in json else None
+    payload = require_json_object()
+    seat_type = payload["seat_type"] if "seat_type" in payload else None
+    model, seat_max = get_booking_model(seat_type)
+    booking = model.query.get(int(id))
+
+    if not booking:
+        abort(404, "Booking does not exist")
 
     if request.method == "DELETE":
-        booking = None
-        booking = (
-            Booking.query.get(id)
-            if seat_type == "standard"
-            else (
-                ConsoleBooking.query.get(id)
-                if seat_type == "console"
-                else abort(400, "Invalid seat_type")
-            )
-        )
-
-        if not booking:
-            abort(404, "Booking does not exist")
-
         db.session.delete(booking)
-        db.session.commit()
+
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            abort(400, "Unable to delete booking")
 
         return base_req()
 
-    if request.method == "PUT":
-        paid = json["paid"] if "paid" in json else None
-        seat = json["seat"] if "seat" in json else None
-        name = json["name"] if "name" in json else None
-        email = json["email"] if "email" in json else None
-        school_class = json["school_class"].upper() if "school_class" in json else None
+    allowed_fields = {"paid", "seat", "name", "email", "school_class", "seat_type"}
+    unknown_fields = set(payload.keys()) - allowed_fields
 
-        booking = None
+    if unknown_fields:
+        abort(400, f"Unknown fields in request: {', '.join(sorted(unknown_fields))}")
 
-        booking = (
-            Booking.query.get(id)
-            if seat_type == "standard"
-            else (
-                ConsoleBooking.query.get(id)
-                if seat_type == "console"
-                else abort(400, "Invalid seat_type")
-            )
-        )
+    if len(set(payload.keys()) - {"seat_type"}) == 0:
+        abort(400, "No editable fields provided")
 
-        if not booking:
-            abort(404, "Booking does not exist")
+    if "paid" in payload:
+        booking.paid = boolean_validation(payload["paid"], vanity="paid")
 
-        booking.seat = seat if seat is not None else booking.seat
-        booking.paid = paid if paid is not None else booking.paid
-        booking.name = name if name is not None else booking.name
-        booking.email = email if email is not None else booking.email
-        booking.school_class = (
-            school_class if school_class is not None else booking.school_class
-        )
+    if "name" in payload:
+        booking.name = name_validation(payload["name"])
 
+    if "email" in payload:
+        normalized_email = normalize_email(payload["email"])
+        existing_email_booking = model.query.filter_by(email=normalized_email).first()
+
+        if existing_email_booking and existing_email_booking.seat != booking.seat:
+            abort(400, "Email already has a booking for this seat type")
+
+        booking.email = normalized_email
+
+    if "school_class" in payload:
+        booking.school_class = school_class_validation(payload["school_class"])
+
+    if "seat" in payload:
+        seat = payload["seat"]
+
+        if not is_integer(seat):
+            abort(400, "Seat must be integer")
+
+        seat = int(seat)
+
+        if seat < 1 or seat > seat_max:
+            abort(400, f"Seat must be in range 1 - {seat_max}")
+
+        existing_seat_booking = model.query.get(seat)
+
+        if existing_seat_booking and existing_seat_booking.seat != booking.seat:
+            abort(400, "Seat already booked.")
+
+        booking.seat = seat
+
+    try:
         db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        abort(400, "Booking update conflicts with an existing booking")
 
-        return base_req()
+    return base_req()
 
 
 @booking_blueprint.route("/available")
@@ -163,90 +206,52 @@ def available():
 @google_logged_in
 @user_registered
 def book():
-    seat = request.json["seat"]
-    seat_type = request.json["seat_type"]
+    payload = require_json_object()
 
-    # Validate user input, must be an integer
+    if "seat" not in payload:
+        abort(400, "Missing key seat")
+
+    if "seat_type" not in payload:
+        abort(400, "Missing key seat_type")
+
+    seat = payload["seat"]
+    seat_type = payload["seat_type"]
+    model, seat_max = get_booking_model(seat_type)
+
     if not is_integer(seat):
         abort(400, "Seat must be integer")
 
-    # Seat integer must be within bookable range
-    seat_max = (
-        NUM_SEATS
-        if seat_type == "standard"
-        else (
-            NUM_CONSOLE_SEATS
-            if seat_type == "console"
-            else abort(400, "Invalid seat_type")  # only two types of seat
-        )
-    )
+    seat = int(seat)
 
-    if int(seat) < 1 or int(seat) > seat_max:
+    if seat < 1 or seat > seat_max:
         abort(400, f"Seat must be in range 1 - {seat_max}")
 
-    # Check if this seat is already booked by querying the database
-
-    if (
-        Booking.query.get(int(seat))
-        if seat_type == "standard"
-        else (
-            ConsoleBooking.query.get(int(seat))
-            if seat_type == "console"
-            else abort(400, "Invalid seat_type")
-        )
-    ):
+    if model.query.get(seat):
         abort(400, "Seat already booked.")
 
-    # Check if this user already has a booking
-    if (
-        len(
-            (
-                Booking.query.filter_by(email=session["google_email"]).all()
-                if seat_type == "standard"
-                else (
-                    ConsoleBooking.query.filter_by(email=session["google_email"]).all()
-                    if seat_type == "console"
-                    else abort(400, "Invalid seat_type")
-                    # bad seat_type would have triggered abort earlier but good practice to always handle bad data
-                )
-            )
-        )
-        != 0  # realized this is whole if-statement is quite unreadable but it is very compact
-    ):
+    if model.query.filter_by(email=session["google_email"]).first():
         abort(
             400,
             "You have already booked a seat. Contact administrator for help with cancellation or seat movement.",
         )
 
-    # Retrieve current user object
     user = User.query.filter_by(email=session["google_email"]).one()
 
-    # Create new booking object
-    booking = (
-        Booking(
-            seat=int(seat),
-            name=session["google_name"],
-            email=session["google_email"],
-            school_class=user.school_class,
-            paid=False,
-        )
-        if seat_type == "standard"
-        else (
-            ConsoleBooking(
-                seat=int(seat),
-                name=session["google_name"],
-                email=session["google_email"],
-                school_class=user.school_class,
-                paid=False,
-            )
-            if seat_type == "console"
-            else abort(400, "Invalid seat_type")
-        )
+    booking = model(
+        seat=seat,
+        name=session["google_name"],
+        email=session["google_email"],
+        school_class=user.school_class,
+        paid=False,
     )
 
-    # Add to database
     db.session.add(booking)
-    db.session.commit()
+
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        abort(400, "Seat already booked.")
 
     return base_req()
 
@@ -258,18 +263,14 @@ def swish(seat_type, id):
     if not is_integer(id):
         abort(400, "Id must be integer")
 
-    booking = (
-        Booking.query.get(int(id))
-        if seat_type == "standard"
-        else (
-            ConsoleBooking.query.get(int(id))
-            if seat_type == "console"
-            else abort(400, "Invalid seat_type")
-        )
-    )
+    model, _ = get_booking_model(seat_type)
+    booking = model.query.get(int(id))
 
     if not booking:
         abort(404, "Booking does not exist")
+
+    if not current_user_is_admin() and booking.email != session["google_email"]:
+        abort(403, "You are not allowed to view payment details for this booking")
 
     buf = generate_swish_qr(
         booking.name,

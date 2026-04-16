@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
 
-import { Container, Button, CircularProgress, Grid } from "@material-ui/core";
+import { Container, Button, CircularProgress } from "@material-ui/core";
 import Alert from "@material-ui/lab/Alert";
 import Typography from "@material-ui/core/Typography";
 import Link from "@material-ui/core/Link";
@@ -26,55 +26,91 @@ function Login() {
   }, []);
 
   return (
-    <Container maxWidth="sm">
-      <Typography variant="h4" gutterBottom align="center">
-        Datorklubben Bokningssystem
-      </Typography>
-      <Typography variant="body1" gutterBottom align="center">
-        Denna sida använder en cookie för att hantera inloggningen. Inga
-        personuppgifter delas med tredjepart. Efter LAN:et raderas samtliga
-        personuppgifter. För frågor, kontakta{" "}
-        <Link href="mailto:info@tgdk.se">info@tgdk.se</Link>.
-      </Typography>
-      <Typography variant="caption" display="block" align="center" gutterBottom>
-        © Tullinge Gymnasium Datorklubb, org.nr. 802530-4208
-      </Typography>
+    <div className="app-shell">
+      <Container className="page-shell page-shell-tight" maxWidth="md">
+        <div className="hero-panel auth-card">
+          <div className="hero-grid">
+            <div>
+              <p className="kicker">Tullinge gymnasium datorklubb</p>
+              <h1 className="hero-title">Bokningssystem för nästa LAN</h1>
+              <p className="hero-lead">
+                Logga in med ditt Google-konto för att se bokningsläget, välja
+                plats och hantera betalning inför LAN:et.
+              </p>
 
-      <Typography align="center" variant="caption" gutterBottom display="block">
-        Kör{" "}
-        <Link href="https://github.com/tullingedk/booking">
-          tullingedk/booking
-        </Link>{" "}
-        {meta.version ? meta.version : "unknown"}, commit{" "}
-        {meta.hash ? meta.hash : "unknown"} (
-        {meta.hashDate ? meta.hashDate : "unknown"})
-      </Typography>
-      <Typography align="center" variant="caption" gutterBottom display="block">
-        Kodat av <Link href="https://vilhelmprytz.se">Vilhelm Prytz</Link>
-      </Typography>
+              <div className="hero-actions">
+                {loginUrl && (
+                  <Button variant="contained" color="primary" href={loginUrl}>
+                    Logga in med Google
+                  </Button>
+                )}
+                <Button
+                  variant="outlined"
+                  color="primary"
+                  href="https://member.tgdk.se"
+                >
+                  Bli medlem först
+                </Button>
+              </div>
 
-      {loginUrl && (
-        <Grid container spacing={2}>
-          <Grid item xs={12}>
-            <Grid container justify="center" spacing={1}>
-              <Button variant="contained" color="primary" href={loginUrl}>
-                Logga in med Google
-              </Button>
-            </Grid>
-          </Grid>
-        </Grid>
-      )}
-      {!loginUrl && !error && (
-        <Grid container spacing={2}>
-          <Grid item xs={12}>
-            <Grid container justify="center" spacing={1}>
-              <CircularProgress />
-            </Grid>
-          </Grid>
-        </Grid>
-      )}
-      {error && <Alert severity="error">{error}</Alert>}
-    </Container>
+              {!loginUrl && !error && (
+                <div className="hero-actions">
+                  <CircularProgress size={28} />
+                </div>
+              )}
+
+              {error && <Alert severity="error">{error}</Alert>}
+            </div>
+
+            <div className="meta-stack">
+              <div className="meta-row">
+                <span className="meta-label">Integritet</span>
+                <span className="meta-value">Sessionscookie används för inloggning</span>
+              </div>
+              <div className="meta-row">
+                <span className="meta-label">Kontakt</span>
+                <span className="meta-value">
+                  <Link href="mailto:info@tgdk.se">info@tgdk.se</Link>
+                </span>
+              </div>
+              <div className="meta-row">
+                <span className="meta-label">Förening</span>
+                <span className="meta-value">Tullinge Gymnasium Datorklubb</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="section-stack">
+          <div className="section-card">
+            <div className="section-header">
+              <h2 className="section-title">Innan du bokar</h2>
+              <p className="section-lead">
+                Medlemskap krävs. Personuppgifter används bara för att hantera
+                bokningen och rensas efter evenemanget.
+              </p>
+            </div>
+
+            <div className="info-grid">
+              <div className="summary-card">
+                <strong>1. Logga in</strong>
+                <span>Använd ditt Google-konto för att starta en säker session.</span>
+              </div>
+              <div className="summary-card">
+                <strong>2. Registrera dig</strong>
+                <span>Ange registreringslösenordet om du inte redan är upplagd.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <Typography align="center" className="meta-footer" variant="caption" display="block">
+          Kör <Link href="https://github.com/tullingedk/booking">tullingedk/booking</Link>{" "}
+          {meta.version ? meta.version : "unknown"}, commit {meta.hash ? meta.hash : "unknown"} (
+          {meta.hashDate ? meta.hashDate : "unknown"})
+        </Typography>
+      </Container>
+    </div>
   );
 }
 
