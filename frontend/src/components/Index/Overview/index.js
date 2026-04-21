@@ -1,167 +1,266 @@
-import React from "react";
-import { makeStyles } from "@material-ui/core/styles";
-import Grid from "@material-ui/core/Grid";
-
+import React, { useState } from "react";
 import { useSelector, useDispatch } from "react-redux";
+
+import Button from "@material-ui/core/Button";
+import TextField from "@material-ui/core/TextField";
+
 import { setBookingDialog } from "../../../redux/bookingActions";
+import {
+  buildSeatInventory,
+  getBookingStatusLabel,
+  getSeatTypeMeta,
+} from "../../../utils/booking";
 
-import Typography from "@material-ui/core/Typography";
-import Paper from "@material-ui/core/Paper";
-import Tooltip from "@material-ui/core/Tooltip";
+const STANDARD_ROWS = [
+  [1, 6],
+  [7, 12],
+  [13, 18],
+  [19, 24],
+  [25, 30],
+  [31, 36],
+  [37, 42],
+  [43, 48],
+  [49, 55],
+];
+const CONSOLE_ROWS = [[1, 20]];
+const STATUS_FILTERS = ["all", "available", "unpaid", "paid", "hidden"];
+const TYPE_FILTERS = ["all", "standard", "console"];
 
-const useStyles = makeStyles((theme) => ({
-  root: {
-    display: "grid",
-    gap: theme.spacing(3),
-  },
-  seatCard: {
-    padding: theme.spacing(1.2),
-    textAlign: "center",
-    color: theme.palette.text.primary,
-    cursor: "pointer",
-    fontWeight: 700,
-    transition: "transform 120ms ease, box-shadow 120ms ease",
-    "&:hover": {
-      transform: "translateY(-2px)",
-      boxShadow: "0 18px 36px rgba(17, 17, 17, 0.08)",
-    },
-  },
-}));
-
-function isEven(n) {
-  return n % 2 === 0;
+function getSeatButtonClass(status, isMatched) {
+  return [
+    "seat-map-button",
+    `seat-map-button-${status}`,
+    isMatched ? "" : "is-muted",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
-function isOdd(n) {
-  return Math.abs(n % 2) === 1;
-}
-
-function getBookingAppearance(booking) {
-  if (!booking) {
-    return { backgroundColor: "rgba(255, 255, 255, 0.92)" };
+function getStatusChipClass(status) {
+  if (status === "paid") {
+    return "status-chip success";
   }
 
-  if (booking.paid === null) {
-    return { backgroundColor: "#d7e8ff" };
+  if (status === "unpaid") {
+    return "status-chip pending";
   }
 
-  return {
-    backgroundColor: booking.paid ? "#ff8a80" : "#ffe082",
-  };
+  return "status-chip hidden";
 }
 
-function getBookingLabel(booking) {
-  if (!booking) {
+function getSeatDescription(seat) {
+  if (!seat.booking) {
     return "Ledig plats";
   }
 
-  if (booking.paid === null) {
-    return "Platsen är upptagen";
+  if (seat.booking.can_view_private) {
+    return `${seat.booking.name} • ${getBookingStatusLabel(seat.status)}`;
   }
 
-  return `${booking.name} ${booking.school_class}`.trim();
+  return "Upptagen plats";
 }
 
 function Overview() {
-  const classes = useStyles();
-
-  const bookings = useSelector((state) => state.bookingReducer.bookings);
-  const consoleBookings = useSelector(
-    (state) => state.bookingReducer.console_bookings
-  );
-
   const dispatch = useDispatch();
+  const user = useSelector((state) => state.user);
+  const bookingReducer = useSelector((state) => state.bookingReducer);
 
-  function Row(props) {
+  const [searchTerm, setSearchTerm] = useState("");
+  const [seatTypeFilter, setSeatTypeFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+
+  const seatInventory = buildSeatInventory({
+    bookings: bookingReducer.bookings,
+    consoleBookings: bookingReducer.console_bookings,
+    numSeats: bookingReducer.num_seats,
+    numConsoleSeats: bookingReducer.num_console_seats,
+  });
+  const seatLookup = new Map(seatInventory.map((seat) => [seat.id, seat]));
+  const normalizedSearch = searchTerm.trim().toLowerCase();
+  const filteredSeats = seatInventory.filter((seat) => {
+    const matchesType =
+      seatTypeFilter === "all" || seat.seat_type === seatTypeFilter;
+    const matchesStatus =
+      statusFilter === "all" || seat.status === statusFilter;
+    const matchesSearch =
+      normalizedSearch.length === 0 ||
+      seat.searchableText.includes(normalizedSearch);
+
+    return matchesType && matchesStatus && matchesSearch;
+  });
+  const filteredSeatIds = new Set(filteredSeats.map((seat) => seat.id));
+  const activeFilterCount = [seatTypeFilter, statusFilter].filter(
+    (value) => value !== "all"
+  ).length + (normalizedSearch ? 1 : 0);
+
+  const openSeat = (seat, seatType) => {
+    dispatch(setBookingDialog(true, seat, seatType));
+  };
+
+  const renderSeatRow = (seatType, start, end) => {
+    const seats = Array.from({ length: end - start + 1 }, (_, index) => {
+      const seatNumber = start + index;
+      return seatLookup.get(`${seatType}-${seatNumber}`);
+    }).filter(Boolean);
+
     return (
-      <>
-        {Array(parseInt(props.max, 10) - parseInt(props.min, 10) + 1)
-          .fill()
-          .map((_, idx) => parseInt(props.min, 10) + idx)
-          .map((id) => {
-            let tableSpacing = 0;
-            if (isEven(props.min) && isEven(id)) {
-              tableSpacing = 20;
-            }
-            if (isOdd(props.min) && isOdd(id)) {
-              tableSpacing = 20;
-            }
-            const booking =
-              props.seat_type === "standard"
-                ? bookings.find((seat) => seat.seat === id)
-                : consoleBookings.find((seat) => seat.seat === id);
-            return (
-              <Grid
-                style={{ paddingLeft: `${tableSpacing}px` }}
-                key={id}
-                item
-                xs={4}
-                sm={2}
-              >
-                <Tooltip title={getBookingLabel(booking)} placement="top">
-                  <Paper
-                    style={getBookingAppearance(booking)}
-                    className={classes.seatCard}
-                    onClick={() =>
-                      dispatch(setBookingDialog(true, id, props.seat_type))
-                    }
-                  >
-                    {id}
-                  </Paper>
-                </Tooltip>
-              </Grid>
-            );
-          })}
-      </>
+      <div className="seat-map-row" key={`${seatType}-${start}-${end}`}>
+        {seats.map((seat) => (
+          <button
+            className={getSeatButtonClass(
+              seat.status,
+              activeFilterCount === 0 || filteredSeatIds.has(seat.id)
+            )}
+            key={seat.id}
+            onClick={() => openSeat(seat.seat, seat.seat_type)}
+            title={getSeatDescription(seat)}
+            type="button"
+          >
+            <span className="seat-map-number">{seat.seat}</span>
+            <span className="seat-map-meta">
+              {seat.booking?.can_view_private
+                ? seat.booking.name
+                : getBookingStatusLabel(seat.status)}
+            </span>
+          </button>
+        ))}
+      </div>
     );
-  }
+  };
 
   return (
-    <div className={classes.root}>
-      <div className="seat-section">
-        <Typography className="seat-section-title">
-          Platser för deltagare med egen dator eller konsol
-        </Typography>
-        <Grid container spacing={1}>
-          <Grid container item xs={12} spacing={1}>
-            <Row min={1} max={6} seat_type="standard" />
-          </Grid>
-          <Grid container item xs={12} spacing={1}>
-            <Row min={7} max={12} seat_type="standard" />
-          </Grid>
-          <Grid container item xs={12} spacing={1}>
-            <Row min={13} max={18} seat_type="standard" />
-          </Grid>
-          <Grid container item xs={12} spacing={1}>
-            <Row min={19} max={24} seat_type="standard" />
-          </Grid>
-          <Grid container item xs={12} spacing={1}>
-            <Row min={25} max={30} seat_type="standard" />
-          </Grid>
-          <Grid container item xs={12} spacing={1}>
-            <Row min={31} max={36} seat_type="standard" />
-          </Grid>
-          <Grid container item xs={12} spacing={1}>
-            <Row min={37} max={42} seat_type="standard" />
-          </Grid>
-          <Grid container item xs={12} spacing={1}>
-            <Row min={43} max={48} seat_type="standard" />
-          </Grid>
-          <Grid container item xs={12} spacing={1}>
-            <Row min={49} max={55} seat_type="standard" />
-          </Grid>
-        </Grid>
+    <div className="seat-explorer">
+      <div className="seat-explorer-toolbar">
+        <div className="seat-filter-group seat-filter-search">
+          <TextField
+            fullWidth
+            label="Sök plats"
+            onChange={(event) => setSearchTerm(event.target.value)}
+            placeholder={
+              user.is_admin
+                ? "Sök på plats, namn, klass eller e-post"
+                : "Sök på platsnummer eller din bokning"
+            }
+            value={searchTerm}
+            variant="outlined"
+          />
+        </div>
+
+        <div className="seat-filter-group">
+          {TYPE_FILTERS.map((filter) => (
+            <button
+              className={`filter-chip ${
+                seatTypeFilter === filter ? "active" : ""
+              }`}
+              key={filter}
+              onClick={() => setSeatTypeFilter(filter)}
+              type="button"
+            >
+              {filter === "all" ? "Alla kategorier" : getSeatTypeMeta(filter).shortLabel}
+            </button>
+          ))}
+        </div>
+
+        <div className="seat-filter-group">
+          {STATUS_FILTERS.map((filter) => (
+            <button
+              className={`filter-chip ${
+                statusFilter === filter ? "active" : ""
+              }`}
+              key={filter}
+              onClick={() => setStatusFilter(filter)}
+              type="button"
+            >
+              {filter === "all" ? "Alla statusar" : getBookingStatusLabel(filter)}
+            </button>
+          ))}
+        </div>
+
+        <div className="seat-toolbar-meta">
+          <span className="helper-text">
+            {filteredSeats.length} av {seatInventory.length} platser matchar
+          </span>
+          {activeFilterCount > 0 && (
+            <Button
+              color="primary"
+              onClick={() => {
+                setSearchTerm("");
+                setSeatTypeFilter("all");
+                setStatusFilter("all");
+              }}
+            >
+              Rensa filter
+            </Button>
+          )}
+        </div>
       </div>
 
-      <div className="seat-section">
-        <Typography className="seat-section-title">
-          Platser utan bordsplacering
-        </Typography>
-        <Grid container spacing={1}>
-          <Grid container item xs={12} spacing={1}>
-            <Row min={1} max={20} seat_type="console" />
-          </Grid>
-        </Grid>
+      <div className="seat-explorer-layout">
+        <div className="seat-result-panel">
+          <div className="panel-header">
+            <h3 className="card-title">Matchande platser</h3>
+            <span className="card-pill">Snabböppning</span>
+          </div>
+          <div className="list-stack">
+            {filteredSeats.slice(0, 14).map((seat) => (
+              <button
+                className="seat-result-row"
+                key={`result-${seat.id}`}
+                onClick={() => openSeat(seat.seat, seat.seat_type)}
+                type="button"
+              >
+                <div className="seat-result-copy">
+                  <strong>
+                    {seat.seat_type_label} {seat.seat}
+                  </strong>
+                  <span>{getSeatDescription(seat)}</span>
+                </div>
+                <span className={getStatusChipClass(seat.status)}>
+                  {seat.statusLabel}
+                </span>
+              </button>
+            ))}
+            {filteredSeats.length === 0 && (
+              <div className="empty-state-card seat-result-empty">
+                <h3 className="card-title">Inga träffar</h3>
+                <p className="card-copy">
+                  Testa att rensa filtren eller sök på ett annat platsnummer,
+                  namn eller klass.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="seat-map-panel">
+          <div className="seat-section">
+            <div className="panel-header">
+              <h3 className="card-title">Datorplatser</h3>
+              <span className="helper-text">
+                Fast placering med bord och stol
+              </span>
+            </div>
+            <div className="seat-map-grid">
+              {STANDARD_ROWS.map(([start, end]) =>
+                renderSeatRow("standard", start, end)
+              )}
+            </div>
+          </div>
+
+          <div className="seat-section">
+            <div className="panel-header">
+              <h3 className="card-title">Konsol- och brädspelsplatser</h3>
+              <span className="helper-text">
+                Bokas här men utan specifik bordsplacering
+              </span>
+            </div>
+            <div className="seat-map-grid seat-map-grid-console">
+              {CONSOLE_ROWS.map(([start, end]) =>
+                renderSeatRow("console", start, end)
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

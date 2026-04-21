@@ -16,6 +16,11 @@ import MoveSeatDialog from "./MoveSeatDialog";
 import EditDialog from "./EditDialog";
 
 import { fetchBookings, setBookingDialog } from "../../../redux/bookingActions";
+import {
+  formatBookingTime,
+  getBookingStatusLabel,
+  getSeatTypeMeta,
+} from "../../../utils/booking";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -34,70 +39,86 @@ function SeatDialog() {
           (seat) => seat.seat === bookingReducer.dialog_id
         );
   const [error, setError] = useState("");
+  const [busyAction, setBusyAction] = useState("");
+
+  const bookingType = bookingReducer.dialog_seat_type;
+  const bookingTypeLabel = getSeatTypeMeta(bookingType).label;
+  const hasPrivateBookingDetails = booking && booking.can_view_private;
+  const avatarSeed = booking
+    ? booking.email || booking.name || String(booking.seat)
+    : "seat";
+  const alreadyBookedThisType = bookingReducer.my_bookings.some(
+    (userBooking) => userBooking.seat_type === bookingType
+  );
+  const canBookSeatDirectly =
+    bookingReducer.dialog_open && !booking && !alreadyBookedThisType;
 
   const handleClose = () => {
     setError("");
+    setBusyAction("");
     dispatch(setBookingDialog(false, null, null));
   };
 
-  const changePaymentStatus = (paymentStatus) => {
-    fetch(`${BACKEND_URL}/api/booking/${bookingReducer.dialog_id}`, {
+  const runBookingMutation = (url, method, body, onSuccess) => {
+    setBusyAction(method);
+    setError("");
+
+    fetch(url, {
       credentials: "include",
-      method: "put",
+      method: method,
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        paid: paymentStatus,
-        seat_type: bookingReducer.dialog_seat_type,
-      }),
+      body: JSON.stringify(body),
     })
       .then((response) => response.json())
       .then((data) => {
         if (data.http_code === 200) {
           dispatch(fetchBookings());
+          if (onSuccess) {
+            onSuccess();
+          }
         } else {
           setError(`Ett fel uppstod: ${data.message} (${data.http_code})`);
         }
       })
       .catch((e) => {
         setError(`Ett fel uppstod: ${e}`);
+      })
+      .finally(() => {
+        setBusyAction("");
       });
+  };
+
+  const changePaymentStatus = (paymentStatus) => {
+    runBookingMutation(
+      `${BACKEND_URL}/api/booking/${bookingReducer.dialog_id}`,
+      "put",
+      {
+        paid: paymentStatus,
+        seat_type: bookingType,
+      }
+    );
   };
 
   const deleteBooking = () => {
-    fetch(`${BACKEND_URL}/api/booking/${bookingReducer.dialog_id}`, {
-      credentials: "include",
-      method: "delete",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
+    runBookingMutation(
+      `${BACKEND_URL}/api/booking/${bookingReducer.dialog_id}`,
+      "delete",
+      {
+        seat_type: bookingType,
       },
-      body: JSON.stringify({
-        seat_type: bookingReducer.dialog_seat_type,
-      }),
-    })
-      .then((response) => response.json())
-      .then((data) => {
-        if (data.http_code === 200) {
-          dispatch(fetchBookings());
-          handleClose();
-        } else {
-          setError(`Ett fel uppstod: ${data.message} (${data.http_code})`);
-        }
-      })
-      .catch((e) => {
-        setError(`Ett fel uppstod: ${e}`);
-      });
+      handleClose
+    );
   };
 
-  const bookingTypeLabel =
-    bookingReducer.dialog_seat_type === "standard"
-      ? "Plats med bordsplacering"
-      : "Plats utan bordsplacering";
-  const hasPrivateBookingDetails = booking && booking.paid !== null;
-  const avatarSeed = booking ? booking.email || booking.name || String(booking.seat) : "seat";
+  const bookSeat = () => {
+    runBookingMutation(`${BACKEND_URL}/api/booking/book`, "post", {
+      seat: bookingReducer.dialog_id,
+      seat_type: bookingType,
+    });
+  };
 
   return (
     <Dialog
@@ -112,12 +133,20 @@ function SeatDialog() {
         <div className="inline-avatar-title">
           <Avatar
             alt={booking ? booking.name : bookingTypeLabel}
-            src={booking && booking.picture_url ? booking.picture_url : `https://www.gravatar.com/avatar/${md5(avatarSeed)}`}
+            src={
+              booking && booking.picture_url
+                ? booking.picture_url
+                : `https://www.gravatar.com/avatar/${md5(avatarSeed)}`
+            }
           />
           <div>
-            <Typography variant="h6">{bookingTypeLabel} {bookingReducer.dialog_id}</Typography>
+            <Typography variant="h6">
+              {bookingTypeLabel} {bookingReducer.dialog_id}
+            </Typography>
             <Typography variant="body2" color="textSecondary">
-              {booking ? "Detaljer för vald plats" : "Platsen är ledig just nu"}
+              {booking
+                ? "Detaljer för vald plats"
+                : "Platsen är ledig och kan bokas direkt härifrån"}
             </Typography>
           </div>
         </div>
@@ -126,9 +155,13 @@ function SeatDialog() {
       <DialogContent dividers>
         {!booking && (
           <div className="dialog-copy">
-            <Typography gutterBottom>Den här platsen är ledig just nu.</Typography>
+            <Typography gutterBottom>
+              Den här platsen är ledig just nu.
+            </Typography>
             <Typography color="textSecondary">
-              Stäng dialogen och använd bokningsknappen för att välja platsen i rätt kategori.
+              {alreadyBookedThisType
+                ? "Du har redan en aktiv bokning i den här kategorin. Kontakta administratör om du behöver flytta eller radera den."
+                : "Du kan boka platsen direkt från den här dialogen utan att gå tillbaka till formuläret."}
             </Typography>
           </div>
         )}
@@ -162,17 +195,28 @@ function SeatDialog() {
                 )}
 
                 <Typography gutterBottom>
-                  Bokades: {booking.time_created || "Okänt"}
+                  Bokades: {formatBookingTime(booking.time_created)}
                 </Typography>
                 <Typography gutterBottom>
-                  Modifierades senast: {booking.time_updated || "Inte ändrad ännu"}
+                  Modifierades senast: {formatBookingTime(booking.time_updated)}
                 </Typography>
                 <Typography gutterBottom>
                   Betalstatus:{" "}
-                  <span className={`status-chip ${booking.paid ? "success" : "pending"}`}>
-                    {booking.paid ? "Markerad som betald" : "Väntar på betalning"}
+                  <span
+                    className={`status-chip ${
+                      booking.paid ? "success" : "pending"
+                    }`}
+                  >
+                    {getBookingStatusLabel(booking.status)}
                   </span>
                 </Typography>
+                {booking.is_owner && !user.is_admin && (
+                  <Typography color="textSecondary">
+                    Det här är din bokning. Du kan visa betalningsdetaljer här och
+                    kontakta styrelsen om du behöver hjälp med flytt eller
+                    avbokning.
+                  </Typography>
+                )}
               </>
             ) : (
               <Typography gutterBottom>
@@ -182,41 +226,76 @@ function SeatDialog() {
 
             {!hasPrivateBookingDetails && (
               <Typography color="textSecondary">
-                Den här platsen är bokad av någon annan. Personuppgifter och betalningsdetaljer visas bara för bokningens ägare och administratörer.
+                Den här platsen är bokad av någon annan. Personuppgifter och
+                betalningsdetaljer visas bara för bokningens ägare och
+                administratörer.
               </Typography>
             )}
-
-            {error && <Alert severity="error">{error}</Alert>}
 
             {hasPrivateBookingDetails && booking.paid === false && (
               <>
                 <img
                   className="dialog-qr"
                   alt={`Swish QR-kod för plats ${bookingReducer.dialog_id}`}
-                  src={`${BACKEND_URL}/api/booking/swish/${bookingReducer.dialog_seat_type}/${bookingReducer.dialog_id}?${performance.now()}`}
+                  src={`${BACKEND_URL}/api/booking/swish/${bookingType}/${bookingReducer.dialog_id}?${performance.now()}`}
                 />
+                <div className="meta-list">
+                  <span>Mottagare: {event.swish_name || "Styrelsen"}</span>
+                  {event.swish_phone && <span>Swish: {event.swish_phone}</span>}
+                  <span>
+                    Referens: {bookingTypeLabel} {bookingReducer.dialog_id}
+                  </span>
+                </div>
                 <Typography color="textSecondary">
-                  Skanna QR-koden med Swish. Vid frågor om bokning, platsbyte eller betalning, kontakta {event.swish_name || "styrelsen"}.
+                  Skanna QR-koden med Swish. Vid frågor om bokning, platsbyte
+                  eller betalning, kontakta {event.swish_name || "styrelsen"}.
                 </Typography>
               </>
             )}
           </div>
         )}
+
+        {error && <Alert severity="error">{error}</Alert>}
       </DialogContent>
 
       <DialogActions>
         <Button onClick={handleClose} color="secondary">
           Stäng
         </Button>
+
+        {canBookSeatDirectly && (
+          <Button
+            color="primary"
+            disabled={busyAction !== ""}
+            onClick={bookSeat}
+            variant="contained"
+          >
+            Boka platsen
+          </Button>
+        )}
+
         {user.is_admin && booking && hasPrivateBookingDetails && (
           <>
-            <Button variant="outlined" color="secondary" onClick={() => deleteBooking()}>
+            <Button
+              variant="outlined"
+              color="secondary"
+              disabled={busyAction !== ""}
+              onClick={deleteBooking}
+            >
               Radera
             </Button>
-            <Button onClick={() => changePaymentStatus(true)} color="primary">
+            <Button
+              color="primary"
+              disabled={busyAction !== ""}
+              onClick={() => changePaymentStatus(true)}
+            >
               Markera som betald
             </Button>
-            <Button onClick={() => changePaymentStatus(false)} color="secondary">
+            <Button
+              color="secondary"
+              disabled={busyAction !== ""}
+              onClick={() => changePaymentStatus(false)}
+            >
               Markera som obetald
             </Button>
             <MoveSeatDialog />

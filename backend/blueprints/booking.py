@@ -8,6 +8,8 @@
 #                                                                         #
 ###########################################################################
 
+from collections import Counter
+
 from flask import session, abort, Blueprint, request, send_file
 from sqlalchemy.exc import IntegrityError
 
@@ -27,6 +29,10 @@ booking_blueprint = Blueprint("booking", __name__, template_folder="../templates
 
 NUM_SEATS = 55
 NUM_CONSOLE_SEATS = 20
+SEAT_TYPE_LABELS = {
+    "standard": "Datorplats",
+    "console": "Konsol- eller bradspelsplats",
+}
 
 
 def get_booking_model(seat_type):
@@ -43,21 +49,42 @@ def current_user_is_admin():
     return Admin.query.filter_by(email=session["google_email"]).first() is not None
 
 
-def booking_picture_url(email):
-    user = User.query.filter_by(email=email).first()
-    return user.google_picture_url if user and user.google_picture_url else ""
+def seat_type_label(seat_type):
+    return SEAT_TYPE_LABELS.get(seat_type, seat_type)
 
 
-def serialize_booking(booking, can_view_private, can_view_admin_fields):
+def booking_status(booking, can_view_private):
+    if not can_view_private:
+        return "hidden"
+
+    return "paid" if booking.paid else "unpaid"
+
+
+def serialize_booking(
+    booking,
+    seat_type,
+    current_email,
+    is_admin_user,
+    picture_lookup,
+):
+    can_view_private = is_admin_user or booking.email == current_email
+    can_view_admin_fields = is_admin_user
+
     return {
         "seat": booking.seat,
         "name": booking.name if can_view_private else "Upptagen",
         "school_class": booking.school_class if can_view_private else "",
         "email": booking.email if can_view_admin_fields else None,
         "paid": booking.paid if can_view_private else None,
-        "picture_url": booking_picture_url(booking.email) if can_view_private else "",
+        "picture_url": picture_lookup.get(booking.email, "") if can_view_private else "",
         "time_created": str(booking.time_created) if can_view_private else None,
         "time_updated": str(booking.time_updated) if can_view_private else None,
+        "seat_type": seat_type,
+        "seat_type_label": seat_type_label(seat_type),
+        "status": booking_status(booking, can_view_private),
+        "is_owner": booking.email == current_email,
+        "can_view_private": can_view_private,
+        "can_view_admin_fields": can_view_admin_fields,
     }
 
 
@@ -70,6 +97,105 @@ def require_json_object():
     return payload
 
 
+def booking_sort_key(booking):
+    return booking.time_updated or booking.time_created
+
+
+def build_picture_lookup(standard_bookings, console_bookings):
+    emails = {booking.email for booking in standard_bookings + console_bookings}
+
+    if len(emails) == 0:
+        return {}
+
+    users = User.query.filter(User.email.in_(emails)).all()
+    return {user.email: user.google_picture_url or "" for user in users}
+
+
+def build_capacity_summary(bookings, total):
+    booked = len(bookings)
+    paid = sum(1 for booking in bookings if booking.paid)
+    unpaid = booked - paid
+    available = total - booked
+
+    return {
+        "total": total,
+        "booked": booked,
+        "available": available,
+        "paid": paid,
+        "unpaid": unpaid,
+        "occupancy_rate": round((booked / total) * 100, 1) if total > 0 else 0,
+        "payment_completion_rate": round((paid / booked) * 100, 1) if booked > 0 else 0,
+    }
+
+
+def serialize_my_booking(booking, seat_type):
+    return {
+        "seat": booking.seat,
+        "seat_type": seat_type,
+        "seat_type_label": seat_type_label(seat_type),
+        "name": booking.name,
+        "school_class": booking.school_class,
+        "email": booking.email,
+        "paid": booking.paid,
+        "status": "paid" if booking.paid else "unpaid",
+        "time_created": str(booking.time_created),
+        "time_updated": str(booking.time_updated) if booking.time_updated else None,
+    }
+
+
+def serialize_admin_booking(booking, seat_type, picture_lookup):
+    return {
+        "seat": booking.seat,
+        "seat_type": seat_type,
+        "seat_type_label": seat_type_label(seat_type),
+        "name": booking.name,
+        "email": booking.email,
+        "school_class": booking.school_class,
+        "paid": booking.paid,
+        "status": "paid" if booking.paid else "unpaid",
+        "picture_url": picture_lookup.get(booking.email, ""),
+        "time_created": str(booking.time_created),
+        "time_updated": str(booking.time_updated) if booking.time_updated else None,
+    }
+
+
+def build_admin_insights(standard_bookings, console_bookings, picture_lookup):
+    combined = [("standard", booking) for booking in standard_bookings] + [
+        ("console", booking) for booking in console_bookings
+    ]
+
+    unpaid_bookings = [
+        serialize_admin_booking(booking, seat_type, picture_lookup)
+        for seat_type, booking in sorted(
+            (item for item in combined if not item[1].paid),
+            key=lambda item: booking_sort_key(item[1]),
+        )
+    ]
+
+    recent_activity = [
+        serialize_admin_booking(booking, seat_type, picture_lookup)
+        for seat_type, booking in sorted(
+            combined,
+            key=lambda item: booking_sort_key(item[1]),
+            reverse=True,
+        )[:8]
+    ]
+
+    class_breakdown = [
+        {"school_class": school_class, "count": count}
+        for school_class, count in Counter(
+            booking.school_class for _, booking in combined
+        ).most_common()
+    ]
+
+    return {
+        "unpaid_bookings": unpaid_bookings,
+        "recent_activity": recent_activity,
+        "class_breakdown": class_breakdown,
+        "unique_classes": len(class_breakdown),
+    }
+
+
 @booking_blueprint.route("/bookings")
 @google_logged_in
 @user_registered
@@ -78,27 +204,63 @@ def bookings():
     console_bookings = ConsoleBooking.query.all()
     is_admin_user = current_user_is_admin()
     current_email = session["google_email"]
+    picture_lookup = build_picture_lookup(standard_bookings, console_bookings)
+    my_bookings = []
+
+    for seat_type, booking_list in (
+        ("standard", standard_bookings),
+        ("console", console_bookings),
+    ):
+        user_booking = next(
+            (booking for booking in booking_list if booking.email == current_email),
+            None,
+        )
+
+        if user_booking:
+            my_bookings.append(serialize_my_booking(user_booking, seat_type))
+
+    summary = {
+        "standard": build_capacity_summary(standard_bookings, NUM_SEATS),
+        "console": build_capacity_summary(console_bookings, NUM_CONSOLE_SEATS),
+    }
+    summary["overall"] = build_capacity_summary(
+        standard_bookings + console_bookings,
+        NUM_SEATS + NUM_CONSOLE_SEATS,
+    )
 
     return base_req(
         response={
             "bookings": [
                 serialize_booking(
                     booking,
-                    can_view_private=is_admin_user or booking.email == current_email,
-                    can_view_admin_fields=is_admin_user,
+                    seat_type="standard",
+                    current_email=current_email,
+                    is_admin_user=is_admin_user,
+                    picture_lookup=picture_lookup,
                 )
                 for booking in standard_bookings
             ],
             "console_bookings": [
                 serialize_booking(
                     booking,
-                    can_view_private=is_admin_user or booking.email == current_email,
-                    can_view_admin_fields=is_admin_user,
+                    seat_type="console",
+                    current_email=current_email,
+                    is_admin_user=is_admin_user,
+                    picture_lookup=picture_lookup,
                 )
                 for booking in console_bookings
             ],
             "num_seats": NUM_SEATS,
             "num_console_seats": NUM_CONSOLE_SEATS,
+            "summary": summary,
+            "my_bookings": my_bookings,
+            "admin_insights": build_admin_insights(
+                standard_bookings,
+                console_bookings,
+                picture_lookup,
+            )
+            if is_admin_user
+            else None,
         }
     )
 

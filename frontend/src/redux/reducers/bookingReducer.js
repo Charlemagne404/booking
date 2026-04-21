@@ -15,6 +15,9 @@ const initialState = {
   dialog_seat_type: null,
   num_seats: null,
   num_console_seats: null,
+  summary: null,
+  my_bookings: [],
+  admin_insights: null,
 };
 
 function bookingReducer(state = initialState, action) {
@@ -42,6 +45,9 @@ function bookingReducer(state = initialState, action) {
         console_bookings: action.payload.console_bookings,
         num_seats: action.payload.num_seats,
         num_console_seats: action.payload.num_console_seats,
+        summary: action.payload.summary,
+        my_bookings: action.payload.my_bookings,
+        admin_insights: action.payload.admin_insights,
       };
 
     case FETCH_BOOKINGS_FAILURE:
