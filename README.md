@@ -18,7 +18,7 @@ docker-compose -f prod.yml up -d
 
 ## Frontend
 
-The frontend is coded in React. It's mean to be served under the project root, `/`. Before you build, set the environment variable `REACT_APP_BACKEND_URL` to the URL of your backend (e.g. `https://booking.tgdk.se`).
+The frontend is coded in React. It can be served either from the project root `/` or from GitHub Pages under a repository subpath. Before you build, set the environment variable `REACT_APP_BACKEND_URL` to the URL of your backend (e.g. `https://booking.tgdk.se`).
 
 Build the project.
 
@@ -27,6 +27,14 @@ npm run build
 ```
 
 Serve the static files generated in `build`.
+
+### GitHub Pages
+
+The repository includes a GitHub Actions workflow that builds `frontend/` and deploys the static output to GitHub Pages.
+
+- In GitHub repository settings, enable Pages and choose `GitHub Actions` as the source.
+- Add a repository variable named `REACT_APP_BACKEND_URL` with the public backend URL.
+- Push to the default branch to publish an updated frontend.
 
 ## File structure
 
