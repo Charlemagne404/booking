@@ -49,4 +49,7 @@ This project is licensed under the terms of the GNU General Public License 3.0. 
 
 Created, initially written and maintained by [Vilhelm Prytz](https://github.com/VilhelmPrytz).
 
+Modified and further developed by Charlie Arnerstal.
+
 Copyright (C) 2018 - 2020, Vilhelm Prytz, <vilhelm@prytznet.se>, et al.
+Copyright (C) 2026, Charlie Arnerstal.
